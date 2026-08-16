@@ -24,7 +24,7 @@ export default function AdminPage() {
 
         console.log('🔍 Checking admin status for:', session.user.email);
 
-        // Ambil profile user
+        // Ambil profile user - PAKAI 'let' BUKAN 'const'
         let { data: prof, error } = await supabase
           .from('profiles')
           .select('*')
@@ -53,6 +53,7 @@ export default function AdminPage() {
             setLoading(false);
             return;
           }
+          // SEKARANG BISA DI-REASSIGN KARENA PAKAI 'let'
           prof = newProf;
         }
 
@@ -145,7 +146,6 @@ export default function AdminPage() {
         <div className="text-center">
           <h1 className="text-4xl font-bold text-red-500">⛔ Akses Ditolak</h1>
           <p className="mt-4 text-gray-400">Hanya admin yang dapat mengakses halaman ini.</p>
-          <p className="text-sm text-gray-500 mt-2">Email: {profileData?.email || 'Unknown'}</p>
           <button onClick={() => router.push('/dashboard')} className="mt-6 bg-blue-600 px-6 py-2 rounded">Kembali</button>
         </div>
       </div>
@@ -159,6 +159,7 @@ export default function AdminPage() {
           <h1 className="text-3xl font-bold text-yellow-400">👑 Admin Panel</h1>
           <div>
             <button onClick={() => router.push('/dashboard')} className="bg-blue-600 px-4 py-2 rounded mr-2">Dashboard</button>
+            <button onClick={() => router.push('/scan')} className="bg-purple-600 px-4 py-2 rounded mr-2">📷 Scan</button>
             <button onClick={handleLogout} className="bg-red-600 px-4 py-2 rounded">Logout</button>
           </div>
         </div>
