@@ -4,27 +4,51 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 
+// Loading Spinner
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
+    <div className="text-center">
+      <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-400 mx-auto mb-4"></div>
+      <p>Memeriksa akses...</p>
+    </div>
+  </div>
+);
+
 export default function ScanPage() {
   const [scanInput, setScanInput] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [error, setError] = useState(null);
   const router = useRouter();
 
   useEffect(() => {
     const checkAdmin = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.push('/'); return; }
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select('is_admin')
-        .eq('id', session.user.id)
-        .single();
-      if (!prof?.is_admin) {
-        alert('⛔ Hanya admin yang dapat mengakses halaman ini.');
-        router.push('/dashboard');
-      } else {
-        setIsAdmin(true);
+      try {
+        setError(null);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) { router.push('/'); return; }
+        
+        const { data: prof, error: profError } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', session.user.id)
+          .single();
+
+        if (profError) throw new Error('Gagal memeriksa akses: ' + profError.message);
+
+        if (!prof?.is_admin) {
+          alert('⛔ Hanya admin yang dapat mengakses halaman ini.');
+          router.push('/dashboard');
+        } else {
+          setIsAdmin(true);
+        }
+      } catch (err) {
+        console.error('Auth error:', err);
+        setError(err.message);
+      } finally {
+        setAuthLoading(false);
       }
     };
     checkAdmin();
@@ -58,33 +82,44 @@ export default function ScanPage() {
           ticket: data.ticket
         });
       }
-    } catch (error) {
-      setResult({ error: `Error: ${error.message}` });
+    } catch (err) {
+      setResult({ error: `Error: ${err.message}` });
     }
 
     setLoading(false);
   };
 
-  if (!isAdmin) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-400 mx-auto mb-4"></div>
-        <p>Memeriksa akses...</p>
+  if (authLoading) return <LoadingSpinner />;
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+        <div className="text-center max-w-md p-8 bg-red-900/30 rounded-2xl border border-red-500">
+          <h2 className="text-2xl font-bold text-red-400 mb-2">😅 Error</h2>
+          <p className="text-gray-400">{error}</p>
+          <button onClick={() => window.location.reload()} className="mt-4 bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700">
+            Coba Lagi
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  if (!isAdmin) return null;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
+    <div className="min-h-screen bg-gray-900 text-white p-4 md:p-6">
       <div className="max-w-2xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold text-purple-400">📷 Validasi QR Tiket</h1>
-          <button onClick={() => router.push('/admin')} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded transition">⬅️ Kembali</button>
+        <div className="flex flex-wrap justify-between items-center mb-6 gap-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-purple-400">📷 Validasi QR Tiket</h1>
+          <button onClick={() => router.push('/admin')} className="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded transition">
+            ⬅️ Kembali
+          </button>
         </div>
 
-        <div className="bg-gray-800 p-8 rounded-2xl shadow-lg">
+        <div className="bg-gray-800 p-6 md:p-8 rounded-2xl shadow-lg">
           <p className="text-gray-400 mb-4">Masukkan kode QR atau token tiket untuk validasi.</p>
-          <div className="flex gap-4">
+          <div className="flex flex-col sm:flex-row gap-4">
             <input
               type="text"
               placeholder="Scan QR atau ketik token..."
@@ -96,7 +131,7 @@ export default function ScanPage() {
             <button
               onClick={handleScan}
               disabled={loading}
-              className="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-lg font-bold transition disabled:opacity-50"
+              className="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-lg font-bold transition disabled:opacity-50 whitespace-nowrap"
             >
               {loading ? '⏳' : '🔍 Validasi'}
             </button>
@@ -124,7 +159,7 @@ export default function ScanPage() {
             <p>💡 <strong>Tips:</strong></p>
             <ul className="list-disc list-inside mt-2 space-y-1">
               <li>Copy-paste token QR dari halaman tiket di dashboard.</li>
-              <li>Token bersifat <strong>case sensitive</strong> (huruf besar/kecil berpengaruh).</li>
+              <li>Token bersifat <strong>case sensitive</strong>.</li>
               <li>Setelah divalidasi, status tiket berubah menjadi <span className="text-yellow-300">ISSUED</span>.</li>
             </ul>
           </div>

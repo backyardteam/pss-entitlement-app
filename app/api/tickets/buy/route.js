@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { sendTicketConfirmation } from '@/lib/email';
 
-// Buat Supabase client dengan Service Role Key (server-side)
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY
@@ -18,11 +18,20 @@ export async function POST(request) {
       );
     }
 
-    // Generate QR token unik
+    // Dapatkan data user
+    const { data: userProfile, error: userError } = await supabaseAdmin
+      .from('profiles')
+      .select('full_name, email')
+      .eq('id', userId)
+      .single();
+
+    if (userError) {
+      console.error('User fetch error:', userError);
+    }
+
     const qrToken = `${userId}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const matchDateStr = matchDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-    // Insert tiket pakai supabaseAdmin (bypass RLS)
     const { data, error } = await supabaseAdmin
       .from('tickets')
       .insert([{
@@ -42,10 +51,24 @@ export async function POST(request) {
       );
     }
 
+    // Kirim email konfirmasi
+    if (userProfile?.email) {
+      const emailResult = await sendTicketConfirmation(
+        userProfile.email,
+        userProfile.full_name || 'Supporter',
+        matchDateStr,
+        qrToken
+      );
+      if (!emailResult.success) {
+        console.error('Email send error:', emailResult.error);
+        // Email gagal tetap lanjut, user tetap dapat tiket
+      }
+    }
+
     return NextResponse.json({
       success: true,
       ticket: data,
-      message: 'Tiket berhasil dipesan!'
+      message: 'Tiket berhasil dipesan! Email konfirmasi telah dikirim.'
     });
 
   } catch (error) {

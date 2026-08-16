@@ -5,6 +5,16 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
+// Loading Spinner
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center min-h-screen bg-gray-900 text-white">
+    <div className="text-center">
+      <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-yellow-400 mx-auto mb-4"></div>
+      <p>Memeriksa akses...</p>
+    </div>
+  </div>
+);
+
 export default function AdminPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -13,7 +23,7 @@ export default function AdminPage() {
   const [rules, setRules] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [message, setMessage] = useState('');
-  const [profileData, setProfileData] = useState(null);
+  const [error, setError] = useState(null);
   const [stats, setStats] = useState({
     totalUsers: 0,
     totalTickets: 0,
@@ -24,16 +34,17 @@ export default function AdminPage() {
   useEffect(() => {
     const checkAdmin = async () => {
       try {
+        setError(null);
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) { router.push('/'); return; }
 
-        let { data: prof, error } = await supabase
+        let { data: prof, error: profError } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', session.user.id)
           .single();
 
-        if (error) {
+        if (profError && profError.code === 'PGRST116') {
           const { data: newProf, error: insertError } = await supabase
             .from('profiles')
             .insert([{
@@ -46,15 +57,11 @@ export default function AdminPage() {
             .select()
             .single();
 
-          if (insertError) {
-            console.error('Error creating profile:', insertError);
-            setLoading(false);
-            return;
-          }
+          if (insertError) throw new Error('Gagal membuat profil: ' + insertError.message);
           prof = newProf;
+        } else if (profError) {
+          throw new Error('Gagal mengambil profil: ' + profError.message);
         }
-
-        setProfileData(prof);
 
         if (!prof?.is_admin) {
           setIsAdmin(false);
@@ -68,6 +75,7 @@ export default function AdminPage() {
 
       } catch (err) {
         console.error('Error:', err);
+        setError(err.message);
         setLoading(false);
       }
     };
@@ -75,100 +83,102 @@ export default function AdminPage() {
   }, []);
 
   const fetchAllData = async () => {
-    // Ambil semua user
-    const { data: userData } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
-    setUsers(userData || []);
+    try {
+      const { data: userData } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setUsers(userData || []);
 
-    // Ambil rules
-    const { data: ruleData } = await supabase
-      .from('entitlement_rules')
-      .select('*')
-      .order('purchase_day', { ascending: true });
-    setRules(ruleData || []);
+      const { data: ruleData } = await supabase
+        .from('entitlement_rules')
+        .select('*')
+        .order('purchase_day', { ascending: true });
+      setRules(ruleData || []);
 
-    // Ambil semua tiket untuk statistik
-    const { data: ticketData } = await supabase
-      .from('tickets')
-      .select('*')
-      .order('created_at', { ascending: false });
-    setTickets(ticketData || []);
+      const { data: ticketData } = await supabase
+        .from('tickets')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setTickets(ticketData || []);
 
-    // Hitung statistik
-    const tierDist = { A: 0, B: 0, C: 0, D: 0 };
-    userData?.forEach(u => {
-      if (tierDist[u.tier] !== undefined) tierDist[u.tier]++;
-    });
+      const tierDist = { A: 0, B: 0, C: 0, D: 0 };
+      userData?.forEach(u => {
+        if (tierDist[u.tier] !== undefined) tierDist[u.tier]++;
+      });
 
-    // Hitung tiket per match (group by match_date)
-    const matchMap = {};
-    ticketData?.forEach(t => {
-      if (!matchMap[t.match_date]) matchMap[t.match_date] = 0;
-      matchMap[t.match_date]++;
-    });
-    const ticketsByMatch = Object.entries(matchMap)
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .slice(-10); // 10 match terakhir
+      const matchMap = {};
+      ticketData?.forEach(t => {
+        if (!matchMap[t.match_date]) matchMap[t.match_date] = 0;
+        matchMap[t.match_date]++;
+      });
+      const ticketsByMatch = Object.entries(matchMap)
+        .map(([date, count]) => ({ date, count }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(-10);
 
-    setStats({
-      totalUsers: userData?.length || 0,
-      totalTickets: ticketData?.length || 0,
-      tierDistribution: tierDist,
-      ticketsByMatch
-    });
+      setStats({
+        totalUsers: userData?.length || 0,
+        totalTickets: ticketData?.length || 0,
+        tierDistribution: tierDist,
+        ticketsByMatch
+      });
+    } catch (err) {
+      console.error('Fetch error:', err);
+      setError('Gagal mengambil data: ' + err.message);
+    }
   };
 
   const updateUserTier = async (userId, newTier) => {
     setMessage('');
-    const { error } = await supabase
-      .from('profiles')
-      .update({ tier: newTier })
-      .eq('id', userId);
-    if (error) {
-      setMessage(`❌ Gagal: ${error.message}`);
-    } else {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ tier: newTier })
+        .eq('id', userId);
+      if (error) throw new Error(error.message);
       setMessage(`✅ Tier berhasil diupdate!`);
       await fetchAllData();
+    } catch (err) {
+      setMessage(`❌ Gagal: ${err.message}`);
     }
   };
 
   const toggleCommunityVerification = async (userId, currentStatus, currentTier) => {
     setMessage('');
-    const newStatus = !currentStatus;
-    // Jika diverifikasi, naikkan ke Tier B (kecuali sudah A)
-    const newTier = newStatus ? (currentTier === 'A' ? 'A' : 'B') : currentTier;
-    
-    const { error } = await supabase
-      .from('profiles')
-      .update({ 
-        is_community_verified: newStatus,
-        community_name: newStatus ? 'BCS Verified' : 'None',
-        tier: newTier
-      })
-      .eq('id', userId);
+    try {
+      const newStatus = !currentStatus;
+      const newTier = newStatus ? (currentTier === 'A' ? 'A' : 'B') : currentTier;
       
-    if (error) {
-      setMessage(`❌ Gagal: ${error.message}`);
-    } else {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ 
+          is_community_verified: newStatus,
+          community_name: newStatus ? 'BCS Verified' : 'None',
+          tier: newTier
+        })
+        .eq('id', userId);
+        
+      if (error) throw new Error(error.message);
       setMessage(`✅ Komunitas ${newStatus ? 'diverifikasi' : 'dicabut'}! Tier berubah ke ${newTier}`);
       await fetchAllData();
+    } catch (err) {
+      setMessage(`❌ Gagal: ${err.message}`);
     }
   };
 
   const updateRule = async (ruleId, field, value) => {
     setMessage('');
-    const { error } = await supabase
-      .from('entitlement_rules')
-      .update({ [field]: value })
-      .eq('id', ruleId);
-    if (error) {
-      setMessage(`❌ Gagal: ${error.message}`);
-    } else {
+    try {
+      const { error } = await supabase
+        .from('entitlement_rules')
+        .update({ [field]: value })
+        .eq('id', ruleId);
+      if (error) throw new Error(error.message);
       setMessage(`✅ Rule berhasil diupdate!`);
       await fetchAllData();
+    } catch (err) {
+      setMessage(`❌ Gagal: ${err.message}`);
     }
   };
 
@@ -177,14 +187,21 @@ export default function AdminPage() {
     router.push('/');
   };
 
-  if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-400 mx-auto mb-4"></div>
-        <p>Memeriksa akses...</p>
+  if (loading) return <LoadingSpinner />;
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+        <div className="text-center max-w-md p-8 bg-red-900/30 rounded-2xl border border-red-500">
+          <h2 className="text-2xl font-bold text-red-400 mb-2">😅 Error</h2>
+          <p className="text-gray-400">{error}</p>
+          <button onClick={() => window.location.reload()} className="mt-4 bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700">
+            Coba Lagi
+          </button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 
   if (!isAdmin) {
     return (
@@ -192,30 +209,36 @@ export default function AdminPage() {
         <div className="text-center">
           <h1 className="text-4xl font-bold text-red-500">⛔ Akses Ditolak</h1>
           <p className="mt-4 text-gray-400">Hanya admin yang dapat mengakses halaman ini.</p>
-          <button onClick={() => router.push('/dashboard')} className="mt-6 bg-blue-600 px-6 py-2 rounded">Kembali</button>
+          <button onClick={() => router.push('/dashboard')} className="mt-6 bg-blue-600 px-6 py-2 rounded hover:bg-blue-700 transition">
+            Kembali
+          </button>
         </div>
       </div>
     );
   }
 
-  // Data untuk pie chart tier distribution
-  const pieData = Object.entries(stats.tierDistribution).map(([name, value]) => ({
-    name,
-    value
-  })).filter(d => d.value > 0);
+  const pieData = Object.entries(stats.tierDistribution)
+    .map(([name, value]) => ({ name, value }))
+    .filter(d => d.value > 0);
 
   const COLORS = ['#FCD34D', '#60A5FA', '#34D399', '#9CA3AF'];
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
+    <div className="min-h-screen bg-gray-900 text-white p-4 md:p-6">
       <div className="max-w-6xl mx-auto">
         {/* HEADER */}
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold text-yellow-400">👑 Admin Panel</h1>
-          <div>
-            <button onClick={() => router.push('/dashboard')} className="bg-blue-600 px-4 py-2 rounded mr-2">Dashboard</button>
-            <button onClick={() => router.push('/scan')} className="bg-purple-600 px-4 py-2 rounded mr-2">📷 Scan</button>
-            <button onClick={handleLogout} className="bg-red-600 px-4 py-2 rounded">Logout</button>
+        <div className="flex flex-wrap justify-between items-center mb-6 gap-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-yellow-400">👑 Admin Panel</h1>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => router.push('/dashboard')} className="bg-blue-600 px-3 py-2 md:px-4 rounded text-sm md:text-base hover:bg-blue-700 transition">
+              Dashboard
+            </button>
+            <button onClick={() => router.push('/scan')} className="bg-purple-600 px-3 py-2 md:px-4 rounded text-sm md:text-base hover:bg-purple-700 transition">
+              📷 Scan
+            </button>
+            <button onClick={handleLogout} className="bg-red-600 px-3 py-2 md:px-4 rounded text-sm md:text-base hover:bg-red-700 transition">
+              Logout
+            </button>
           </div>
         </div>
 
@@ -226,29 +249,28 @@ export default function AdminPage() {
         )}
 
         {/* STATISTIK CEPAT */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-gray-800 p-4 rounded-xl text-center border border-gray-700">
             <p className="text-gray-400 text-sm">Total User</p>
-            <p className="text-3xl font-bold text-white">{stats.totalUsers}</p>
+            <p className="text-2xl md:text-3xl font-bold text-white">{stats.totalUsers}</p>
           </div>
           <div className="bg-gray-800 p-4 rounded-xl text-center border border-gray-700">
             <p className="text-gray-400 text-sm">Total Tiket</p>
-            <p className="text-3xl font-bold text-white">{stats.totalTickets}</p>
+            <p className="text-2xl md:text-3xl font-bold text-white">{stats.totalTickets}</p>
           </div>
           <div className="bg-gray-800 p-4 rounded-xl text-center border border-gray-700">
             <p className="text-gray-400 text-sm">Tier A</p>
-            <p className="text-3xl font-bold text-yellow-400">{stats.tierDistribution.A}</p>
+            <p className="text-2xl md:text-3xl font-bold text-yellow-400">{stats.tierDistribution.A}</p>
           </div>
           <div className="bg-gray-800 p-4 rounded-xl text-center border border-gray-700">
             <p className="text-gray-400 text-sm">Tier B</p>
-            <p className="text-3xl font-bold text-blue-400">{stats.tierDistribution.B}</p>
+            <p className="text-2xl md:text-3xl font-bold text-blue-400">{stats.tierDistribution.B}</p>
           </div>
         </div>
 
         {/* GRAFIK */}
         <div className="grid md:grid-cols-2 gap-6 mb-6">
-          {/* Pie Chart: Tier Distribution */}
-          <div className="bg-gray-800 p-6 rounded-2xl">
+          <div className="bg-gray-800 p-4 md:p-6 rounded-2xl">
             <h3 className="text-lg font-bold mb-4">📊 Distribusi Tier</h3>
             {pieData.length > 0 ? (
               <ResponsiveContainer width="100%" height={250}>
@@ -275,8 +297,7 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* Bar Chart: Tiket per Match */}
-          <div className="bg-gray-800 p-6 rounded-2xl">
+          <div className="bg-gray-800 p-4 md:p-6 rounded-2xl">
             <h3 className="text-lg font-bold mb-4">📈 Tiket per Match</h3>
             {stats.ticketsByMatch.length > 0 ? (
               <ResponsiveContainer width="100%" height={250}>
@@ -294,19 +315,19 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* USER MANAGEMENT + VERIFIKASI KOMUNITAS */}
-        <div className="bg-gray-800 p-6 rounded-2xl">
-          <h2 className="text-xl font-bold mb-4">👥 Manajemen User ({users.length})</h2>
+        {/* USER MANAGEMENT */}
+        <div className="bg-gray-800 p-4 md:p-6 rounded-2xl">
+          <h2 className="text-lg md:text-xl font-bold mb-4">👥 Manajemen User ({users.length})</h2>
           <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-xs md:text-sm">
               <thead className="bg-gray-700 sticky top-0">
                 <tr>
                   <th className="p-2 text-left">Nama</th>
                   <th className="p-2 text-left">Tier</th>
-                  <th className="p-2 text-left">Komunitas</th>
-                  <th className="p-2 text-left">Admin</th>
+                  <th className="p-2 text-left hidden md:table-cell">Komunitas</th>
+                  <th className="p-2 text-left hidden md:table-cell">Admin</th>
                   <th className="p-2 text-left">Aksi Tier</th>
-                  <th className="p-2 text-left">Verif Komunitas</th>
+                  <th className="p-2 text-left">Verif</th>
                 </tr>
               </thead>
               <tbody>
@@ -314,19 +335,19 @@ export default function AdminPage() {
                   <tr key={user.id} className="border-b border-gray-700 hover:bg-gray-700/50">
                     <td className="p-2">{user.full_name || 'N/A'}</td>
                     <td className="p-2 font-bold text-yellow-300">{user.tier}</td>
-                    <td className="p-2">
+                    <td className="p-2 hidden md:table-cell">
                       {user.is_community_verified ? (
-                        <span className="text-green-400">✅ {user.community_name}</span>
+                        <span className="text-green-400 text-xs">✅ {user.community_name}</span>
                       ) : (
                         <span className="text-gray-400">❌</span>
                       )}
                     </td>
-                    <td className="p-2">{user.is_admin ? '✅' : ''}</td>
+                    <td className="p-2 hidden md:table-cell">{user.is_admin ? '✅' : ''}</td>
                     <td className="p-2">
                       <select
                         defaultValue={user.tier}
                         onChange={(e) => updateUserTier(user.id, e.target.value)}
-                        className="bg-gray-700 text-white text-sm p-1 rounded border border-gray-600"
+                        className="bg-gray-700 text-white text-xs p-1 rounded border border-gray-600"
                       >
                         <option value="A">A</option>
                         <option value="B">B</option>
@@ -341,13 +362,13 @@ export default function AdminPage() {
                           user.is_community_verified,
                           user.tier
                         )}
-                        className={`px-2 py-1 rounded text-xs transition ${
+                        className={`px-2 py-1 rounded text-xs transition whitespace-nowrap ${
                           user.is_community_verified
                             ? 'bg-red-600 hover:bg-red-700 text-white'
                             : 'bg-green-600 hover:bg-green-700 text-white'
                         }`}
                       >
-                        {user.is_community_verified ? 'Cabut' : 'Verifikasi'}
+                        {user.is_community_verified ? 'Cabut' : 'Verif'}
                       </button>
                     </td>
                   </tr>
@@ -357,13 +378,13 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* ATURAN PURCHASE WINDOW */}
-        <div className="mt-6 bg-gray-800 p-6 rounded-2xl">
-          <h2 className="text-xl font-bold mb-4">⚙️ Aturan Purchase Window</h2>
+        {/* RULES */}
+        <div className="mt-6 bg-gray-800 p-4 md:p-6 rounded-2xl">
+          <h2 className="text-lg md:text-xl font-bold mb-4">⚙️ Aturan Purchase Window</h2>
           <div className="space-y-4">
             {rules.map((rule) => (
               <div key={rule.id} className="bg-gray-700 p-4 rounded-xl">
-                <div className="flex justify-between items-center">
+                <div className="flex flex-wrap justify-between items-center gap-2">
                   <span className="font-bold text-yellow-300 text-lg">Tier {rule.tier}</span>
                   <span className={`text-sm ${rule.is_active ? 'text-green-400' : 'text-red-400'}`}>
                     {rule.is_active ? '✅ Aktif' : '❌ Nonaktif'}
