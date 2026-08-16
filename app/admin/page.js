@@ -17,25 +17,15 @@ export default function AdminPage() {
     const checkAdmin = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (!session) { 
-          router.push('/'); 
-          return; 
-        }
+        if (!session) { router.push('/'); return; }
 
-        console.log('🔍 Checking admin status for:', session.user.email);
-
-        // Ambil profile user - PAKAI 'let' BUKAN 'const'
         let { data: prof, error } = await supabase
           .from('profiles')
           .select('*')
           .eq('id', session.user.id)
           .single();
 
-        console.log('📊 Profile data:', prof);
-
         if (error) {
-          console.error('❌ Error fetching profile:', error);
-          // Jika profil belum ada, buat dulu
           const { data: newProf, error: insertError } = await supabase
             .from('profiles')
             .insert([{
@@ -49,30 +39,27 @@ export default function AdminPage() {
             .single();
 
           if (insertError) {
-            console.error('❌ Error creating profile:', insertError);
+            console.error('Error creating profile:', insertError);
             setLoading(false);
             return;
           }
-          // SEKARANG BISA DI-REASSIGN KARENA PAKAI 'let'
           prof = newProf;
         }
 
         setProfileData(prof);
 
         if (!prof?.is_admin) {
-          console.log('⛔ User is not admin');
           setIsAdmin(false);
           setLoading(false);
           return;
         }
 
-        console.log('✅ User is admin!');
         setIsAdmin(true);
         await fetchData();
         setLoading(false);
 
       } catch (err) {
-        console.error('🔥 Error:', err);
+        console.error('Error:', err);
         setLoading(false);
       }
     };
@@ -80,15 +67,12 @@ export default function AdminPage() {
   }, []);
 
   const fetchData = async () => {
-    // Ambil semua user (hanya untuk admin)
     const { data: userData } = await supabase
       .from('profiles')
       .select('*')
       .order('created_at', { ascending: false });
-
     setUsers(userData || []);
 
-    // Ambil rules
     const { data: ruleData } = await supabase
       .from('entitlement_rules')
       .select('*')
@@ -102,9 +86,8 @@ export default function AdminPage() {
       .from('profiles')
       .update({ tier: newTier })
       .eq('id', userId);
-
     if (error) {
-      setMessage(`❌ Gagal update tier: ${error.message}`);
+      setMessage(`❌ Gagal: ${error.message}`);
     } else {
       setMessage(`✅ Tier berhasil diupdate!`);
       await fetchData();
@@ -117,9 +100,8 @@ export default function AdminPage() {
       .from('entitlement_rules')
       .update({ [field]: value })
       .eq('id', ruleId);
-
     if (error) {
-      setMessage(`❌ Gagal update rule: ${error.message}`);
+      setMessage(`❌ Gagal: ${error.message}`);
     } else {
       setMessage(`✅ Rule berhasil diupdate!`);
       await fetchData();
@@ -171,7 +153,6 @@ export default function AdminPage() {
         )}
 
         <div className="grid md:grid-cols-2 gap-6">
-          {/* KIRI: Daftar User */}
           <div className="bg-gray-800 p-6 rounded-2xl">
             <h2 className="text-xl font-bold mb-4">👥 Manajemen User ({users.length})</h2>
             <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
@@ -209,7 +190,6 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* KANAN: Aturan Purchase Window */}
           <div className="bg-gray-800 p-6 rounded-2xl">
             <h2 className="text-xl font-bold mb-4">⚙️ Aturan Purchase Window</h2>
             <div className="space-y-4">
@@ -254,7 +234,6 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* STATISTIK CEPAT */}
         <div className="mt-6 grid grid-cols-4 gap-4">
           <div className="bg-gray-800 p-4 rounded-xl text-center">
             <p className="text-gray-400 text-sm">Total User</p>

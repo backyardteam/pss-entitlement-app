@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase, supabaseAdmin } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { QRCodeCanvas } from 'qrcode.react';
 
@@ -62,30 +62,27 @@ export default function Dashboard() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { setBuyMsg('❌ Session expired'); setBuyLoading(false); return; }
 
-    const qrToken = `${session.user.id}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-    const matchDate = new Date();
-    matchDate.setDate(matchDate.getDate() + 7);
-    const matchDateStr = matchDate.toISOString().split('T')[0];
+    try {
+      // Panggil API Route untuk beli tiket (server-side)
+      const response = await fetch('/api/tickets/buy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: session.user.id })
+      });
 
-    // PAKAI supabaseAdmin UNTUK BYPASS RLS
-    const { data, error } = await supabaseAdmin
-      .from('tickets')
-      .insert([{
-        user_id: session.user.id,
-        match_date: matchDateStr,
-        status: 'RESERVED',
-        qr_token: qrToken
-      }])
-      .select();
+      const result = await response.json();
 
-    if (error) {
-      setBuyMsg(`❌ Gagal: ${error.message}`);
-      console.error('Insert error:', error);
-    } else {
-      setBuyMsg(`✅ Tiket berhasil dipesan!`);
-      setTickets([...tickets, data[0]]);
-      setShowQR(data[0].id);
+      if (!response.ok) {
+        setBuyMsg(`❌ Gagal: ${result.error}`);
+      } else {
+        setBuyMsg(`✅ ${result.message}`);
+        setTickets([...tickets, result.ticket]);
+        setShowQR(result.ticket.id);
+      }
+    } catch (error) {
+      setBuyMsg(`❌ Error: ${error.message}`);
     }
+
     setBuyLoading(false);
   };
 

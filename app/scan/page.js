@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { supabase, supabaseAdmin } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 
 export default function ScanPage() {
@@ -38,66 +38,28 @@ export default function ScanPage() {
 
     setLoading(true);
     setResult(null);
-    const token = scanInput.trim();
-    console.log('🔍 Mencari token:', token);
 
-    // 1. Cari tiket berdasarkan qr_token
-    const { data: ticket, error } = await supabase
-      .from('tickets')
-      .select('*')
-      .eq('qr_token', token)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Error query:', error);
-      setResult({ error: `❌ Error query: ${error.message}` });
-      setLoading(false);
-      return;
-    }
-
-    if (!ticket) {
-      setResult({ error: '❌ Tiket tidak ditemukan. Pastikan token yang dimasukkan benar (case sensitive).' });
-      setLoading(false);
-      return;
-    }
-
-    // 2. Ambil nama user dari profiles berdasarkan user_id
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('full_name')
-      .eq('id', ticket.user_id)
-      .maybeSingle();
-
-    let userName = 'Unknown';
-    if (profileError) {
-      console.error('Error fetching profile:', profileError);
-    } else if (profile) {
-      userName = profile.full_name;
-    }
-
-    // 3. Cek status
-    if (ticket.status === 'ISSUED') {
-      setResult({ error: '⚠️ Tiket ini sudah digunakan (status ISSUED).' });
-      setLoading(false);
-      return;
-    }
-
-    // 4. Update status menjadi ISSUED
-    const { error: updateError } = await supabaseAdmin
-      .from('tickets')
-      .update({ status: 'ISSUED' })
-      .eq('id', ticket.id);
-
-    if (updateError) {
-      setResult({ error: `❌ Gagal update: ${updateError.message}` });
-    } else {
-      setResult({
-        success: true,
-        ticket: ticket,
-        message: `✅ Tiket berhasil divalidasi!`,
-        user: userName,
-        matchDate: ticket.match_date
+    try {
+      const response = await fetch('/api/tickets/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qrToken: scanInput.trim() })
       });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setResult({ error: data.error || 'Gagal validasi' });
+      } else {
+        setResult({
+          success: true,
+          message: data.message,
+          user: data.user,
+          ticket: data.ticket
+        });
+      }
+    } catch (error) {
+      setResult({ error: `Error: ${error.message}` });
     }
 
     setLoading(false);
@@ -150,7 +112,7 @@ export default function ScanPage() {
                   <div className="mt-2 text-sm text-gray-300 space-y-1">
                     <p>👤 Pemilik: {result.user}</p>
                     <p>🎟️ ID Tiket: {result.ticket.id}</p>
-                    <p>📅 Match: {result.matchDate}</p>
+                    <p>📅 Match: {result.ticket.match_date}</p>
                     <p>📌 Status sekarang: <span className="text-yellow-300 font-bold">ISSUED</span></p>
                   </div>
                 </>
@@ -164,13 +126,7 @@ export default function ScanPage() {
               <li>Copy-paste token QR dari halaman tiket di dashboard.</li>
               <li>Token bersifat <strong>case sensitive</strong> (huruf besar/kecil berpengaruh).</li>
               <li>Setelah divalidasi, status tiket berubah menjadi <span className="text-yellow-300">ISSUED</span>.</li>
-              <li>Tiket yang sudah ISSUED tidak bisa divalidasi ulang.</li>
             </ul>
-          </div>
-
-          <div className="mt-4 p-3 bg-blue-900/30 border border-blue-500 rounded text-xs text-gray-400">
-            <p>🔍 Debug: Pastikan token yang dimasukkan persis dengan yang ada di database.</p>
-            <p className="mt-1">Cek token di Supabase: SELECT id, qr_token FROM tickets;</p>
           </div>
         </div>
       </div>

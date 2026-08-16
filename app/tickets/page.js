@@ -90,11 +90,6 @@ export default function TicketsPage() {
                     </div>
                   </div>
                 )}
-                {showQR === ticket.id && !ticket.qr_token && (
-                  <div className="mt-4 text-center text-red-500">
-                    ⚠️ Tiket ini tidak memiliki QR token. Silakan hubungi admin.
-                  </div>
-                )}
               </div>
             ))}
           </div>
