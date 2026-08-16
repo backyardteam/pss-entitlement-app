@@ -5,28 +5,11 @@ import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { QRCodeCanvas } from 'qrcode.react';
 
-// Loading Spinner Component
 const LoadingSpinner = () => (
-  <div className="flex items-center justify-center min-h-screen">
+  <div className="flex items-center justify-center min-h-[60vh]">
     <div className="text-center">
       <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-red-700 mx-auto mb-4"></div>
       <p className="text-gray-600">Loading...</p>
-    </div>
-  </div>
-);
-
-// Error Component
-const ErrorDisplay = ({ message, onRetry }) => (
-  <div className="flex items-center justify-center min-h-screen">
-    <div className="text-center max-w-md p-8 bg-red-50 rounded-2xl">
-      <div className="text-5xl mb-4">😅</div>
-      <h2 className="text-2xl font-bold text-red-700 mb-2">Oops!</h2>
-      <p className="text-gray-600 mb-4">{message || 'Terjadi kesalahan. Silakan coba lagi.'}</p>
-      {onRetry && (
-        <button onClick={onRetry} className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition">
-          Coba Lagi
-        </button>
-      )}
     </div>
   </div>
 );
@@ -42,13 +25,39 @@ export default function Dashboard() {
   const [showQR, setShowQR] = useState(null);
   const [error, setError] = useState(null);
 
+  useEffect(() => {
+    const checkAccess = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) { router.push('/'); return; }
+
+        // Cek apakah admin - jika ya, redirect ke /admin
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', session.user.id)
+          .single();
+
+        if (prof?.is_admin) {
+          router.push('/admin');
+          return;
+        }
+
+        await fetchData();
+        setLoading(false);
+      } catch (err) {
+        console.error('Error:', err);
+        setError(err.message);
+        setLoading(false);
+      }
+    };
+    checkAccess();
+  }, []);
+
   const fetchData = async () => {
     try {
-      setError(null);
-      setLoading(true);
-
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.push('/'); return; }
+      if (!session) return;
 
       let { data: prof, error: profError } = await supabase
         .from('profiles')
@@ -57,7 +66,6 @@ export default function Dashboard() {
         .single();
 
       if (profError && profError.code === 'PGRST116') {
-        // Profile not found, create one
         const { data: newProf, error: insertError } = await supabase
           .from('profiles')
           .insert([{
@@ -68,54 +76,39 @@ export default function Dashboard() {
           }])
           .select()
           .single();
-
-        if (insertError) {
-          throw new Error('Gagal membuat profil: ' + insertError.message);
-        }
+        if (insertError) throw new Error(insertError.message);
         prof = newProf;
       } else if (profError) {
-        throw new Error('Gagal mengambil profil: ' + profError.message);
+        throw new Error(profError.message);
       }
 
       setProfile(prof);
 
-      const { data: ruleData, error: ruleError } = await supabase
+      const { data: ruleData } = await supabase
         .from('entitlement_rules')
         .select('*')
         .eq('is_active', true)
         .order('purchase_day', { ascending: true });
-
-      if (ruleError) throw new Error('Gagal mengambil aturan: ' + ruleError.message);
       setRules(ruleData || []);
 
-      const { data: ticketData, error: ticketError } = await supabase
+      const { data: ticketData } = await supabase
         .from('tickets')
         .select('*')
         .eq('user_id', session.user.id)
         .order('created_at', { ascending: false });
-
-      if (ticketError) throw new Error('Gagal mengambil tiket: ' + ticketError.message);
       setTickets(ticketData || []);
 
     } catch (err) {
-      console.error('Fetch error:', err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      throw err;
     }
   };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   const handleBuyTicket = async () => {
     setBuyMsg('');
     setBuyLoading(true);
-
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Session expired. Silakan login ulang.');
+      if (!session) throw new Error('Session expired');
 
       const response = await fetch('/api/tickets/buy', {
         method: 'POST',
@@ -124,18 +117,13 @@ export default function Dashboard() {
       });
 
       const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Gagal membeli tiket');
-      }
+      if (!response.ok) throw new Error(result.error || 'Gagal membeli tiket');
 
       setBuyMsg(`✅ ${result.message}`);
       setTickets([result.ticket, ...tickets]);
       setShowQR(result.ticket.id);
-
     } catch (error) {
       setBuyMsg(`❌ ${error.message}`);
-      console.error('Buy error:', error);
     } finally {
       setBuyLoading(false);
     }
@@ -150,17 +138,13 @@ export default function Dashboard() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error('Silakan login ulang.');
-
       const { error } = await supabase
         .from('profiles')
         .update({ is_kyc_verified: true, tier: 'B' })
         .eq('id', session.user.id);
-
       if (error) throw new Error(error.message);
-
       alert('✅ KYC Berhasil! Tier naik ke B.');
       await fetchData();
-
     } catch (error) {
       alert(`❌ ${error.message}`);
     }
@@ -170,31 +154,16 @@ export default function Dashboard() {
     setShowQR(showQR === ticketId ? null : ticketId);
   };
 
-  // Loading state
   if (loading) return <LoadingSpinner />;
-
-  // Error state
-  if (error) return <ErrorDisplay message={error} onRetry={fetchData} />;
-
-  if (!profile) return <ErrorDisplay message="Profil tidak ditemukan" onRetry={fetchData} />;
+  if (error) return <div className="text-center p-10 text-red-600">Error: {error}</div>;
+  if (!profile) return <div className="text-center p-10">Profil tidak ditemukan</div>;
 
   const myRule = rules.find(r => r.tier === profile.tier);
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:p-6">
       <div className="max-w-4xl mx-auto">
-        {/* HEADER */}
-        <div className="flex flex-wrap justify-between items-center mb-6 gap-2">
-          <h1 className="text-2xl md:text-3xl font-bold text-red-700">🏟️ Dashboard PSS</h1>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => router.push('/tickets')} className="bg-blue-600 text-white px-3 py-2 md:px-4 rounded-lg text-sm md:text-base hover:bg-blue-700 transition">
-              🎫 Tiket
-            </button>
-            <button onClick={handleLogout} className="bg-gray-800 text-white px-3 py-2 md:px-4 rounded-lg text-sm md:text-base hover:bg-gray-900 transition">
-              Logout
-            </button>
-          </div>
-        </div>
+        <h1 className="text-2xl md:text-3xl font-bold text-red-700 mb-6">🏟️ Dashboard Supporter</h1>
 
         {/* PROFIL */}
         <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg mb-6">
@@ -240,19 +209,19 @@ export default function Dashboard() {
 
         {/* BUY TICKET */}
         <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg mb-6">
-          <h3 className="text-lg md:text-xl font-bold mb-2">📦 Simulasi Pembelian Tiket</h3>
-          <p className="text-sm text-gray-500 mb-3">Klik tombol di bawah untuk memesan tiket. QR Code dan email konfirmasi akan otomatis dibuat.</p>
+          <h3 className="text-lg md:text-xl font-bold mb-2">📦 Beli Tiket</h3>
+          <p className="text-sm text-gray-500 mb-3">Klik tombol di bawah untuk memesan tiket.</p>
           <button
             onClick={handleBuyTicket}
             disabled={buyLoading}
-            className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-xl shadow transition disabled:opacity-50 w-full md:w-auto"
+            className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-xl shadow transition disabled:opacity-50"
           >
-            {buyLoading ? '⏳ Memproses...' : '✅ Beli Tiket Sekarang'}
+            {buyLoading ? '⏳ Memproses...' : '✅ Beli Tiket'}
           </button>
           {buyMsg && <p className={`mt-3 font-bold ${buyMsg.includes('✅') ? 'text-green-600' : 'text-red-600'}`}>{buyMsg}</p>}
         </div>
 
-        {/* TICKETS LIST */}
+        {/* TICKETS */}
         {tickets.length > 0 && (
           <div className="bg-white p-4 md:p-6 rounded-2xl shadow-lg mb-6">
             <h3 className="text-lg md:text-xl font-bold mb-4">🎫 Tiket Saya ({tickets.length})</h3>
@@ -263,9 +232,6 @@ export default function Dashboard() {
                     <div>
                       <p className="font-bold">Match: {ticket.match_date}</p>
                       <p className="text-sm text-gray-500">Status: <span className={`font-bold ${ticket.status === 'PAID' ? 'text-green-600' : ticket.status === 'ISSUED' ? 'text-blue-600' : 'text-yellow-600'}`}>{ticket.status}</span></p>
-                      {ticket.qr_token && (
-                        <p className="text-xs text-gray-400 font-mono break-all">Token: {ticket.qr_token.substring(0, 30)}...</p>
-                      )}
                     </div>
                     <button
                       onClick={() => toggleQR(ticket.id)}

@@ -14,14 +14,26 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) router.push('/dashboard');
-    });
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        // Cek apakah admin
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', session.user.id)
+          .single();
+        if (prof?.is_admin) {
+          router.push('/admin');
+        } else {
+          router.push('/dashboard');
+        }
+      }
+    };
+    checkSession();
   }, []);
 
-  const isValidEmail = (email) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  };
+  const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -43,7 +55,6 @@ export default function Home() {
     let result;
 
     if (isLogin) {
-      // LOGIN
       result = await supabase.auth.signInWithPassword({ email, password });
       if (result.error) {
         setErrorMsg(`❌ ${result.error.message}`);
@@ -51,16 +62,22 @@ export default function Home() {
         return;
       }
       if (result.data.session) {
-        router.push('/dashboard');
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', result.data.session.user.id)
+          .single();
+        if (prof?.is_admin) {
+          router.push('/admin');
+        } else {
+          router.push('/dashboard');
+        }
       }
     } else {
-      // REGISTER
       result = await supabase.auth.signUp({
         email,
         password,
-        options: {
-          data: { full_name: fullName || 'Supporter' }
-        }
+        options: { data: { full_name: fullName || 'Supporter' } }
       });
 
       if (result.error) {
@@ -74,37 +91,21 @@ export default function Home() {
       }
 
       const { user } = result.data;
-
       if (user) {
-        // Coba buat profile (tanpa kolom email)
         const { error: insertError } = await supabase
           .from('profiles')
-          .insert([
-            {
-              id: user.id,
-              full_name: fullName || 'Supporter',
-              tier: 'D',
-              loyalty_score: 0,
-              is_kyc_verified: false,
-              is_community_verified: false,
-              community_name: 'None'
-            }
-          ]);
+          .insert([{
+            id: user.id,
+            full_name: fullName || 'Supporter',
+            tier: 'D',
+            loyalty_score: 0,
+            is_kyc_verified: false,
+            is_community_verified: false,
+            community_name: 'None'
+          }]);
 
-        if (insertError) {
-          // Jika gagal karena profile sudah ada (misal dari percobaan sebelumnya), abaikan
-          if (insertError.code === '23505') {
-            // Duplicate key, tidak masalah
-            console.log('ℹ️ Profile sudah ada, melanjutkan...');
-          } else {
-            // Error lain, tampilkan
-            console.error('Error inserting profile:', insertError.message);
-            setErrorMsg(`⚠️ Gagal membuat profil: ${insertError.message}. Silakan coba login.`);
-            // Tetap arahkan ke login, karena user sudah terdaftar di auth
-            setIsLogin(true);
-            setLoading(false);
-            return;
-          }
+        if (insertError && insertError.code !== '23505') {
+          console.error('Error inserting profile:', insertError);
         }
 
         alert('✅ Registrasi berhasil! Silakan login.');
@@ -118,7 +119,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-red-700 to-green-800 p-4">
+    <div className="min-h-[80vh] flex items-center justify-center">
       <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md">
         <h1 className="text-3xl font-bold text-center text-red-700 mb-2">⚽ PSS Sleman</h1>
         <p className="text-center text-gray-500 mb-6">Smart Entitlement Prototype</p>
@@ -169,10 +170,7 @@ export default function Home() {
         <p className="text-center mt-4 text-sm">
           {isLogin ? 'Belum punya akun? ' : 'Sudah punya akun? '}
           <button
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setErrorMsg('');
-            }}
+            onClick={() => { setIsLogin(!isLogin); setErrorMsg(''); }}
             className="text-red-700 font-bold hover:underline"
           >
             {isLogin ? 'Daftar Sekarang' : 'Masuk'}
@@ -180,9 +178,10 @@ export default function Home() {
         </p>
 
         <div className="mt-6 p-4 bg-gray-100 rounded-lg text-xs text-gray-500">
-          <p className="font-bold">📋 Tips:</p>
-          <p>• Gunakan email valid (contoh: nama@domain.com)</p>
-          <p>• Password minimal 6 karakter</p>
+          <p className="font-bold">📋 Info:</p>
+          <p>• Admin: bagio1@gmail.com</p>
+          <p>• Admin akan langsung masuk ke Dashboard Admin</p>
+          <p>• User biasa masuk ke Dashboard User</p>
         </div>
       </div>
     </div>
